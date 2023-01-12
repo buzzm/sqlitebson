@@ -54,7 +54,7 @@ column and a dotpath to descend into the structure:
     select bson_get_bson(bson_column, 'msg.header') ...
     ```
     This will return native binary BSON which by itself is not very useful
-    in the CLI but in programs, the BSON can be easily manipulated by the
+    in the CLI but in actual programs, the BSON can be easily manipulated by the
     BSON SDK.
 
 *  To JSON e.g. <br>
@@ -77,13 +77,14 @@ column and a dotpath to descend into the structure:
    ```
    Suppose we wish to find `hdr` of type `X`.  Converting the `data` to JSON
    means converting the *entire* structure including 4K of other fields that
-   we don't need to process.  For starters we can do this:
+   we don't need to process; instead, we do this:
    ```
    select bson_get_string(bson_column, "data.payload.id") from table
       where bson_get_string(bson_column, "data.hdr.type") = 'X';
    ```
-   The 4K of other fields are never converted to JSON yielding significant
-   performance improvement. 
+   In the extension, the BSON C SDK is being called with the dotpath to
+   performantly descend into the structure.  The 4K of other fields are
+   never converted to JSON yielding significant performance improvement. 
    		    
 
 Status
@@ -110,23 +111,23 @@ so let's make a little program to insert some data.
     static void insert(sqlite3 *db, int nn) {
         sqlite3_stmt* stmt = 0;
 
-	char jbuf[256];
+        char jbuf[256];
 
-	// Use the handy bson_new_from_json() to parse some JSON.  Note the
-	// JSON is Extended JSON (EJSON).  The BSON SDK recognizes the special keys
-	// like $date and $numberDecimal and will construct the appropriate
-	// BSON type; remember, BSON has types not natively support by JSON.
-	// EJSON always takes a string as the "argument" to the special keys
-	// to prevent incorrect parsing of the value -- esp. important for
-	// floating point and penny-precise data!
-	// Note we create a incrementing hdr.id here with the input nn:
-	sprintf(jbuf, "{\"hdr\":{\"id\":\"A%d\", \"ts\":{\"$date\":\"2023-01-12T13:14:15.678Z\"}}, \"amt\":{\"$numberDecimal\":\"10.09\"},  \"A\":{\"B\":[ 7 ,{\"X\":\"QQ\", \"Y\":[\"ee\",\"ff\"]}    ]} }", nn);
+        // Use the handy bson_new_from_json() to parse some JSON.  Note the
+        // JSON is Extended JSON (EJSON).  The BSON SDK recognizes the special keys
+        // like $date and $numberDecimal and will construct the appropriate
+        // BSON type; remember, BSON has types not natively support by JSON.
+        // EJSON always takes a string as the "argument" to the special keys
+        // to prevent incorrect parsing of the value -- esp. important for
+        // floating point and penny-precise data!
+        // Note we create a incrementing hdr.id here with the input nn:
+        sprintf(jbuf, "{\"hdr\":{\"id\":\"A%d\", \"ts\":{\"$date\":\"2023-01-12T13:14:15.678Z\"}}, \"amt\":{\"$numberDecimal\":\"10.09\"},  \"A\":{\"B\":[ 7 ,{\"X\":\"QQ\", \"Y\":[\"ee\",\"ff\"]}    ]} }", nn);
 
     	bson_error_t err; // on stack
     	bson_t* b = bson_new_from_json((const uint8_t *)jbuf, strlen(jbuf), &err);
 
     	const uint8_t* data = bson_get_data(b);
-	int32_t len = b->len;
+        int32_t len = b->len;
 
 	// Normally you should check the return value for success for each
 	// of these calls but for clarity we omit them here:
@@ -138,9 +139,9 @@ so let's make a little program to insert some data.
     }
 
     int main(int argc, char* argv[]) {
-    	sqlite3 *db;
-	char *zErrMsg = 0;
-    	int rc;
+        sqlite3 *db;
+        char *zErrMsg = 0;
+        int rc;
 
     	char* dbf = argv[1];
    
@@ -159,13 +160,16 @@ so let's make a little program to insert some data.
 
 Then back in the sqlite CLI:
 
-    sqlite> .load bsonext sqlite3_bson_init
+    sqlite will try various suffixes (e.g. .dylib or .so) and prefixes to 
+    load the extension.  Regardless of where you put the library, the
+    entry point is always the same:  sqlite3_bson_init
+    sqlite> .load path/to/bsonext sqlite3_bson_init
 
     sqlite> select bson_as_json(bdata) from MYDATA where bson_get_string(bdata, "hdr.id") = 'A34';
     { "hdr" : { "id" : "A34", "ts" : { "$date" : "2023-01-12T13:14:15.678Z" } }, "amt" : { "$numberDecimal" : "10.09" }, "A" : { "B" : [ 7, { "X" : "QQ", "Y" : [ "ee", "ff" ] } ] } }
 
     sqlite> select bson_get_decimal128(bdata, "amt") / 2 from foo where bson_get_string(bdata, "hdr.id"
-5.045
+    5.045
 
 
 
@@ -186,7 +190,24 @@ Requires:
  *  C compiler.  No C++ used. 
 
 Your compile/link environment should look something like this:
-$ gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Lbson/lib -lbson -lsqlite3  bsonext.c -o bsonext.dylib
+    $ gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Lbson/lib -lbson -lsqlite3  bsonext.c -o bsonext.dylib
+
+Issues with OS X
+----------------
+OS X 10.15 and likely other versions comes with libsqlite.dylib pre installed
+with the OS:
+    $ ls -l /usr/lib/libsqlite3.dylib 
+    -rwxr-xr-x  1 root  wheel  4344864 Oct 30  2020 /usr/lib/libsqlite3.dylib
+Unfortuntely, that install is 2 years out of date and does not have either
+the built-in JSON functions nor the `sqlite_load_extension` API.  The newer
+sources do, of course, but the problem is `/usr/lib` is off-limits in OS X 10.15+; even with `sudo` you cannot copy in a newly compiled version and switch the
+symlinks.  The problem this creates is that the linker always searches `/usr/lib` first and will thus find the OLD version of the lib.  The `-L` argument to
+the linker does not help because that *appends* a path to search, not *prepend*.To get around this problem it is necessary to disable the default library search path with the `-Z` option and rebuild the path from scratch, something like this:
+```
+gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Z -Lbson/lib -lbson.1 -Lcodes/sqlite-amalgamation-3400100 -lsqlite3 -L/usr/lib  bsonext.c -o bsonext.dylib
+```
+
+
 
 
 
