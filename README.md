@@ -6,8 +6,12 @@ BSON support for sqlite
 Introduction
 ============
 
-This sqlite extension realizes the BSON data type, together with functions to create and inspect BSON objects for the purposes of expressive and performant
-querying.
+This sqlite provides accessor functions to the BSON data type for the purposes
+of expressive and performant querying. TL;DR:
+```
+    sqlite> .load bsonext sqlite_bson_init
+    sqlite> select bson_get_string(bson_column, "path.to.some.string") from table;
+```    
 
 BSON (http://bsonspec.org/) is a high-performance, richly-typed data carrier
 similar to JSON but offers a number of attractive features including:
@@ -16,9 +20,6 @@ similar to JSON but offers a number of attractive features including:
     JSON these must all be represented as a string, requiring conversion,
     potentially introducing lossiness, and impairing native operations
     like `>` and `<=`.
- *  Performance.  Moving binary BSON in and out of the database under some
-    conditions is almost 10x faster than using native `jsonb` or `json` because
-    it avoids to- and from-string and to-dictionary conversion.
  *  Roundtrip ability.  BSON is binary spec, not a string.  There is no whitespace,
     quoting rules, etc.  BSON that goes into Postgres comes out *exactly* the
     same way, each time, every time.
@@ -32,39 +33,48 @@ column and a dotpath to descend into the structure:
 *  Typesafe high performance accessor functions that take a dotpath notation
     to get to a field e.g.<br>
     ```
-    select bson_get_datetime(bson_column, 'msg.header.event.ts') from table;
-    select bson_get_string(bson_column, 'msg.header.event.type') from table;    
+    select bson_get_datetime(bson, 'msg.header.event.ts') from table;
+    select bson_get_string(bson, 'msg.header.event.type') from table;
+    select bson_get_double(bson, 'value.of.pi') from table;        
     ```
+    `bson` can be either a column name of type BLOB that holds BSON or
+    an expression that yields BSON (see `bson_get_bson` below)
 
 *  Generic fetching where the return type is as appropriate as possible.
    sqlite is very good at letting return values be polymorphic and then
    interpreting their subsequent use.
     ```
-    select bson_get(bson_column, 'data.someInt32') ... return int
-    select bson_get(bson_column, 'data.someInt64') ... returns int64
-    select bson_get(bson_column, 'data.someDouble') ... returns double
-    select bson_get(bson_column, 'data.someDecimal128') ... returns string to avoid floating point conversion issues
-    select bson_get(bson_column, 'data.someDate') ... returns string
+    select bson_get(bson, 'data.someInt32') ... return int
+    select bson_get(bson, 'data.someInt64') ... returns int64
+    select bson_get(bson, 'data.someDouble') ... returns double
+    select bson_get(bson, 'data.someDecimal128') ... returns string to avoid floating point conversion issues
+    select bson_get(bson, 'data.someDate') ... returns string
     ```
     If the target item is not a scalar (i.e. a substructure or array) then
     the JSON equivalent is returned as a string.
 
 *  Native BSON substructures e.g. <br>
     ```
-    select bson_get_bson(bson_column, 'msg.header') ...
+    select bson_get_bson(bson, 'msg.header') ...
     ```
-    This will return native binary BSON which by itself is not very useful
-    in the CLI but in actual programs, the BSON can be easily manipulated by the
-    BSON SDK.
+    This will return the whole header substructure in native binary BSON.
+    Binary data is not particularly in the CLI but in actual sqlite client-side
+    programs, the row-column returned by `sqlite_step()` and then
+    `sqlite3_column_blob()` is easily initialized into a BSON object and 
+    manipulated with the BSON SDK.  This allows client side programs to avoid
+    potentially lossy to- and from- JSON conversion e.g. floating point of
+    6.0 gets emitted as 6 then reparsed as an int.
+    
 
 *  To JSON e.g. <br>
    ```
-   select bson_as_json(bson_column) ... returns string
+   select bson_as_json(bson) ... returns JSON string
    ```
    Combined with both `bson_get_bson()` and the native sqlite JSON functions
    e.g. `json_extract`, this provides a means to very performantly "dig"
    into deep structures without parsing through lots of JSON that you do not
-   need.  For example, consider this BSON structure (shown in simplified JSON):
+   need.  For example, consider this BSON structure (shown in simplified JSON)
+   that might live in BLOB column called `bdata`::
    ```
    data: {
      hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"},
@@ -75,7 +85,15 @@ column and a dotpath to descend into the structure:
      }
    }
    ```
-   Suppose we wish to find `hdr` of type `X`.  Converting the `data` to JSON
+   To print just the header structure we can do this:
+   ```
+   sqlite> select bson_as_json(bson_get_bson(bdata,"hdr")) from MYDATA ...
+   { hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"} }
+   ```
+   Only a fraction of the data is passed to `bson_as_jso()`.
+   
+   Suppose we wish to capture the `id` for those documents where `hdr` is
+   of type `X`.  Converting the `data` to JSON
    means converting the *entire* structure including 4K of other fields that
    we don't need to process; instead, we do this:
    ```
@@ -86,6 +104,7 @@ column and a dotpath to descend into the structure:
    performantly descend into the structure.  The 4K of other fields are
    never converted to JSON yielding significant performance improvement. 
    		    
+
 
 Status
 ======
@@ -189,6 +208,7 @@ Requires:
     
  *  C compiler.  No C++ used. 
 
+
 Your compile/link environment should look something like this:
     $ gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Lbson/lib -lbson -lsqlite3  bsonext.c -o bsonext.dylib
 
@@ -196,13 +216,16 @@ Issues with OS X
 ----------------
 OS X 10.15 and likely other versions comes with libsqlite.dylib pre installed
 with the OS:
+
     $ ls -l /usr/lib/libsqlite3.dylib 
     -rwxr-xr-x  1 root  wheel  4344864 Oct 30  2020 /usr/lib/libsqlite3.dylib
+
 Unfortuntely, that install is 2 years out of date and does not have either
 the built-in JSON functions nor the `sqlite_load_extension` API.  The newer
 sources do, of course, but the problem is `/usr/lib` is off-limits in OS X 10.15+; even with `sudo` you cannot copy in a newly compiled version and switch the
 symlinks.  The problem this creates is that the linker always searches `/usr/lib` first and will thus find the OLD version of the lib.  The `-L` argument to
-the linker does not help because that *appends* a path to search, not *prepend*.To get around this problem it is necessary to disable the default library search path with the `-Z` option and rebuild the path from scratch, something like this:
+the linker does not help because that *appends* a path to search, not *prepend*.
+  To get around this problem it is necessary to disable the default library search path with the `-Z` option and rebuild the path from scratch, something like this:
 ```
 gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Z -Lbson/lib -lbson.1 -Lcodes/sqlite-amalgamation-3400100 -lsqlite3 -L/usr/lib  bsonext.c -o bsonext.dylib
 ```
