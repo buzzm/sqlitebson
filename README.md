@@ -28,17 +28,9 @@ similar to JSON but offers a number of attractive features including:
 
 The extension expects binary BSON to be stored in a BLOB type column.
 
-The extension has four basic types of accessors that take a BSON (BLOB)
+
+The extension has 2 accessors that take a BSON (BLOB)
 column and a dotpath to descend into the structure:
-*  Typesafe high performance accessor functions that take a dotpath notation
-    to get to a field e.g.<br>
-    ```
-    select bson_get_datetime(bson, 'msg.header.event.ts') from table;
-    select bson_get_string(bson, 'msg.header.event.type') from table;
-    select bson_get_double(bson, 'value.of.pi') from table;        
-    ```
-    `bson` can be either a column name of type BLOB that holds BSON or
-    an expression that yields BSON (see `bson_get_bson` below)
 
 *  Generic fetching where the return type is as appropriate as possible.
    sqlite is very good at letting return values be polymorphic and then
@@ -51,59 +43,66 @@ column and a dotpath to descend into the structure:
     select bson_get(bson, 'data.someDate') ... returns string
     ```
     If the target item is not a scalar (i.e. a substructure or array) then
-    the JSON equivalent is returned as a string.
+    the JSON equivalent is returned as a string.  If a "blank" dotpath is
+    supplied then no descent is made and the whole BSON object is converted
+    to JSON:
+    ```
+    select bson_get(bson,"") ... returns JSON string of complete BSON object
+    ```
+    
+    Only the target
+    is converted to JSON, not any other fields, which improves performance.
+    For example, given a structure like this:
+    ```
+    data: {
+      hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"},
+      payload: {
+        id: "ABC123",
+        region: "EAST",
+        ( 4K of other fields and data)
+      }
+   }
+   ```
+   To print just the header structure we can do this:
+   ```
+   sqlite> select bson_get(bdata,"data.hdr") from MYDATA ...
+   { hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"} }
+   ```    
+   Only a fraction of the data will be converted to JSON.
+
+   Similarly, suppose we wish to capture the `id` for those documents
+   where `hdr` is of type `X`.  Converting the `data` to JSON
+   means converting the *entire* structure including 4K of other fields that
+   we don't need to process; instead, we do this:
+   ```
+   select bson_get(bdata, "data.payload.id") from table
+      where bson_get(bdata, "data.hdr.type") = 'X';
+   ```
+   In the extension, the BSON C SDK is being called with the dotpath to
+   performantly descend into the structure.  The 4K of other fields are
+   never converted to JSON yielding significant performance improvement. 
+
+   `bson_get()` is a deterministic and innocuous function and therefore
+   is suitable for use in functional indexes e.g.
+   ```
+   create index XX on MYDATA (bson_get(bdata, "data.payload.id"));
+   ```
+   
+
+
 
 *  Native BSON substructures e.g. <br>
     ```
     select bson_get_bson(bson, 'msg.header') ...
     ```
     This will return the whole header substructure in native binary BSON.
-    Binary data is not particularly in the CLI but in actual sqlite client-side
-    programs, the row-column returned by `sqlite_step()` and then
+    Binary data is not particularly useful in the CLI but in actual sqlite
+    client-side programs, the row-column returned by `sqlite_step()` and then
     `sqlite3_column_blob()` is easily initialized into a BSON object and 
     manipulated with the BSON SDK.  This allows client side programs to avoid
     potentially lossy to- and from- JSON conversion e.g. floating point of
-    6.0 gets emitted as 6 then reparsed as an int.
+    6.0 gets emitted as 6 then reparsed as an int.  See Example below.
     
-
-*  To JSON e.g. <br>
-   ```
-   select bson_as_json(bson) ... returns JSON string
-   ```
-   Combined with both `bson_get_bson()` and the native sqlite JSON functions
-   e.g. `json_extract`, this provides a means to very performantly "dig"
-   into deep structures without parsing through lots of JSON that you do not
-   need.  For example, consider this BSON structure (shown in simplified JSON)
-   that might live in BLOB column called `bdata`::
-   ```
-   data: {
-     hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"},
-     payload: {
-       id: "ABC123",
-       region: "EAST",
-       ( 4K of other fields and data)
-     }
-   }
-   ```
-   To print just the header structure we can do this:
-   ```
-   sqlite> select bson_as_json(bson_get_bson(bdata,"hdr")) from MYDATA ...
-   { hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"} }
-   ```
-   Only a fraction of the data is passed to `bson_as_jso()`.
-   
-   Suppose we wish to capture the `id` for those documents where `hdr` is
-   of type `X`.  Converting the `data` to JSON
-   means converting the *entire* structure including 4K of other fields that
-   we don't need to process; instead, we do this:
-   ```
-   select bson_get_string(bson_column, "data.payload.id") from table
-      where bson_get_string(bson_column, "data.hdr.type") = 'X';
-   ```
-   In the extension, the BSON C SDK is being called with the dotpath to
-   performantly descend into the structure.  The 4K of other fields are
-   never converted to JSON yielding significant performance improvement. 
-   		    
 
 
 Status
@@ -132,7 +131,9 @@ so let's make a little program to insert some data.
 
         char jbuf[256];
 
-        // Use the handy bson_new_from_json() to parse some JSON.  Note the
+        // Use the handy bson_new_from_json() to parse some JSON.  We could
+	// use the low-level C API (bson_append_int, bson_append_utf8, etc.)
+	// but that is tedious for this example.  Note the
         // JSON is Extended JSON (EJSON).  The BSON SDK recognizes the special keys
         // like $date and $numberDecimal and will construct the appropriate
         // BSON type; remember, BSON has types not natively support by JSON.
@@ -184,12 +185,43 @@ Then back in the sqlite CLI:
     entry point is always the same:  sqlite3_bson_init
     sqlite> .load path/to/bsonext sqlite3_bson_init
 
-    sqlite> select bson_as_json(bdata) from MYDATA where bson_get_string(bdata, "hdr.id") = 'A34';
+    sqlite> select bson_get(bdata,"") from MYDATA where bson_get(bdata, "hdr.id") = 'A34';
     { "hdr" : { "id" : "A34", "ts" : { "$date" : "2023-01-12T13:14:15.678Z" } }, "amt" : { "$numberDecimal" : "10.09" }, "A" : { "B" : [ 7, { "X" : "QQ", "Y" : [ "ee", "ff" ] } ] } }
 
-    sqlite> select bson_get_decimal128(bdata, "amt") / 2 from foo where bson_get_string(bdata, "hdr.id"
+    sqlite> select bson_get(bdata, "amt") / 2 from foo where bson_get(bdata, "hdr.id") = 'A12';
     5.045
 
+
+Querying in a client-side program:
+
+    int rc = sqlite3_prepare_v2(db, "SELECT bdata from MYDATA WHERE bson_get(bdata, \"hdr.id\") = ?", -1, &stmt, 0 );    
+
+    rc = sqlite3_bind_text( stmt, 1, "A34", -1, SQLITE_STATIC);
+
+    while ( sqlite3_step( stmt ) == SQLITE_ROW ) {
+	if(sqlite3_column_type(stmt,0) != SQLITE_NULL) {
+	    const void* data = sqlite3_column_blob(stmt, 0);
+	    int len = sqlite3_column_bytes(stmt, 0);
+
+	    bson_t b;
+	    bson_init_static(&b, data, len);
+
+	    // At this point, you have a complete BSON object that can be
+	    // interogated and visited, etc.  Just for show, let's turn it into
+	    // JSON and print:
+	    size_t jsz;
+	    printf("%s\n", bson_as_canonical_extended_json (&b, &jsz));
+        }
+    }
+    
+
+SQLite, BSON, Swift, and the iPhone
+-----------------------------------
+TBD:  Example of how the C-based BSON extension can be added to a Swift
+project, then how the 
+<a href="https://github.com/mongodb/swift-bson">SWIFT SDK for BSON</a>
+can consume the raw data bytes coming out of sqlite in a manner similar
+to `bson_init_static` in the C example above.
 
 
 Building
@@ -210,7 +242,9 @@ Requires:
 
 
 Your compile/link environment should look something like this:
-    $ gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Lbson/lib -lbson -lsqlite3  bsonext.c -o bsonext.dylib
+```
+$ gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Lbson/lib -lbson -lsqlite3  bsonext.c -o bsonext.dylib
+```
 
 Issues with OS X
 ----------------
