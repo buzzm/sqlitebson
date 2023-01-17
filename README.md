@@ -10,7 +10,7 @@ This sqlite provides accessor functions to the BSON data type for the purposes
 of expressive and performant querying. TL;DR:
 ```
     sqlite> .load bsonext sqlite_bson_init
-    sqlite> select bson_get_string(bson_column, "path.to.some.string") from table;
+    sqlite> select bson_get(bson_column, "path.to.some.string") from table;
 ```    
 
 BSON (http://bsonspec.org/) is a high-performance, richly-typed data carrier
@@ -36,18 +36,18 @@ column and a dotpath to descend into the structure:
    sqlite is very good at letting return values be polymorphic and then
    interpreting their subsequent use.
     ```
-    select bson_get(bson, 'data.someInt32') ... return int
-    select bson_get(bson, 'data.someInt64') ... returns int64
-    select bson_get(bson, 'data.someDouble') ... returns double
-    select bson_get(bson, 'data.someDecimal128') ... returns string to avoid floating point conversion issues
-    select bson_get(bson, 'data.someDate') ... returns string
+    select bson_get(bdata, 'data.someInt32') ... return int
+    select bson_get(bdata, 'data.someInt64') ... returns int64
+    select bson_get(bdata, 'data.someDouble') ... returns double
+    select bson_get(bdata, 'data.someDecimal128') ... returns string to avoid floating point conversion issues
+    select bson_get(bdata, 'data.someDate') ... returns string
     ```
     If the target item is not a scalar (i.e. a substructure or array) then
     the JSON equivalent is returned as a string.  If a "blank" dotpath is
     supplied then no descent is made and the whole BSON object is converted
     to JSON:
     ```
-    select bson_get(bson,"") ... returns JSON string of complete BSON object
+    select bson_get(bdata,"") ... returns JSON string of complete BSON object
     ```
     
     Only the target
@@ -87,21 +87,28 @@ column and a dotpath to descend into the structure:
    ```
    create index XX on MYDATA (bson_get(bdata, "data.payload.id"));
    ```
-   
 
 
 
 *  Native BSON substructures e.g. <br>
     ```
-    select bson_get_bson(bson, 'msg.header') ...
+    select bson_get_bson(bdata, 'data.payload') ...
     ```
-    This will return the whole header substructure in native binary BSON.
+    This will return the whole payload substructure in native binary BSON.
     Binary data is not particularly useful in the CLI but in actual sqlite
     client-side programs, the row-column returned by `sqlite_step()` and then
     `sqlite3_column_blob()` is easily initialized into a BSON object and 
     manipulated with the BSON SDK.  This allows client side programs to avoid
     potentially lossy to- and from- JSON conversion e.g. floating point of
     6.0 gets emitted as 6 then reparsed as an int.  See Example below.
+
+    Note there is no purpose in calling `bson_get_bson()` with a blank dotpath;
+    this is equivalent to simply returning the raw BLOB:
+    ```
+    select bdata from  ... returns native binary BSON of complete BSON object
+    ```
+    
+    
     
 
 
@@ -217,11 +224,17 @@ Querying in a client-side program:
 
 SQLite, BSON, Swift, and the iPhone
 -----------------------------------
-TBD:  Example of how the C-based BSON extension can be added to a Swift
-project, then how the 
-<a href="https://github.com/mongodb/swift-bson">SWIFT SDK for BSON</a>
-can consume the raw data bytes coming out of sqlite in a manner similar
-to `bson_init_static` in the C example above.
+iPhone app development in iOS/Swift/Xcode is beyond the scope of this
+extension; however, experiments show that the SQLite.swift package
+in combination with the
+[official pure Swift BSON implementation](https://github.com/mongodb/swift-bson)
+can create BSON objects, convert them to `Data` using `BSON.toData()`,
+insert them as SQLite BLOBS, then fetch and decoded them back into BSON
+objects with `var doc: BSONDocument = try BSONDocument(fromBSON: data)`
+
+
+TBD:  Need a robust way to add these BSON extension functions into the
+Xcode/iOS build process.
 
 
 Building
@@ -236,7 +249,9 @@ Requires:
     <a href="https://www.sqlite.org/2022/sqlite-amalgamation-3400100.zip">HERE</a>
 
  *  `libbson.so` and BSON C SDK `.h` files.  You can make these separately and
-    there is plenty of material on this topic.
+    there is plenty of material on this topic but 
+    <a href="https://github.com/mongodb/mongo-c-driver/tree/master/src/libbson>here's a start</a>.  MongoDB actively ensures the C implementation of BSON is
+    highly portable and compilable for many targets.
     
  *  C compiler.  No C++ used. 
 
@@ -246,10 +261,12 @@ Your compile/link environment should look something like this:
 $ gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Lbson/lib -lbson -lsqlite3  bsonext.c -o bsonext.dylib
 ```
 
-Issues with OS X
-----------------
-OS X 10.15 and likely other versions comes with libsqlite.dylib pre installed
-with the OS:
+
+
+Issues with pre-installed libsqlite
+-----------------------------------
+OS X 10.15 and likely other platforms come with libsqlite.dylib (or .so)
+pre-installed with the OS:
 
     $ ls -l /usr/lib/libsqlite3.dylib 
     -rwxr-xr-x  1 root  wheel  4344864 Oct 30  2020 /usr/lib/libsqlite3.dylib
