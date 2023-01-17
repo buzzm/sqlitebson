@@ -6,14 +6,14 @@ BSON support for sqlite
 Introduction
 ============
 
-This sqlite provides accessor functions to the BSON data type for the purposes
-of expressive and performant querying. TL;DR:
+This sqlite extensionprovides accessor functions to the BSON data type for the
+purposes of expressive and performant querying. TL;DR:
 ```
     sqlite> .load bsonext sqlite_bson_init
     sqlite> select bson_get(bson_column, "path.to.some.string") from table;
 ```    
 
-BSON (http://bsonspec.org/) is a high-performance, richly-typed data carrier
+BSON (http://bsonspec.org) is a high-performance, richly-typed data carrier
 similar to JSON but offers a number of attractive features including:
 
  *  Datetimes, decimal (numeric), and byte[] are first class types.  In pure
@@ -250,11 +250,11 @@ Requires:
 
  *  sqlite development SDK (`sqlite3.h` and `sqlite3ext.h`).  These are part
     of the Source Code distribution nominally available
-    <a href="https://www.sqlite.org/2022/sqlite-amalgamation-3400100.zip">HERE</a>
+    [HERE](https://www.sqlite.org/2022/sqlite-amalgamation-3400100.zip)
 
  *  `libbson.so` and BSON C SDK `.h` files.  You can make these separately and
-    there is plenty of material on this topic but 
-    <a href="https://github.com/mongodb/mongo-c-driver/tree/master/src/libbson>here's a start</a>.  MongoDB actively ensures the C implementation of BSON is
+    there is plenty of material on this topic but
+    [here is a start](https://github.com/mongodb/mongo-c-driver/tree/master/src/libbson).  MongoDB actively ensures the C implementation of BSON is
     highly portable and compilable for many targets.
     
  *  C compiler.  No C++ used. 
