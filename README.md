@@ -7,7 +7,9 @@ Introduction
 ============
 
 This sqlite extensionprovides accessor functions to the BSON data type for the
-purposes of expressive and performant querying. TL;DR:
+purposes of expressive and performant querying.
+
+TL;DR: You will need BSON and sqlite development C language SDKs (header files and dynamic/shared libraries); then:
 ```
     sqlite> .load bsonext sqlite_bson_init
     sqlite> select bson_get(bson_column, "path.to.some.string") from table;
