@@ -120,14 +120,18 @@ Experimental.  All contribs / PRs / comments / issues welcome.
 
 Example
 =======
+Try compiling and linking `example1.c`, included in this repo.  A prototype
+Makefile highlighting the workarounds for OS X `/usr/lib/libsqlite.dynlib`
+issue should get you going.  Linux and other targets pretty much use the
+same simple compile/link line except with `.so` instead of `.dynlib`, etc.
+
+
 Dealing with binary BSON through the CLI is not very interesting
 so let's make a little program to insert some data.
 
     Note that sqlite doesn't really care about the column type name!
     sqlite> create table MYDATA ( bdata BSON );
 
-    $ cat test1.c
-    
     #include <stdio.h>
     #include <sqlite3.h>
 
