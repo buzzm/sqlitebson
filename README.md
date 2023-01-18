@@ -6,7 +6,7 @@ BSON support for sqlite
 Introduction
 ============
 
-This sqlite extensionprovides accessor functions to the BSON data type for the
+This sqlite extension provides accessor functions to the BSON data type for the
 purposes of expressive and performant querying.
 
 TL;DR: You will need BSON and sqlite development C language SDKs (header files and dynamic/shared libraries); then:
