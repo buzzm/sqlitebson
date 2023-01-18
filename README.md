@@ -20,10 +20,11 @@ TL;DR: You will need BSON and sqlite development C language SDKs (header files a
     {"string_field": "hello world", "num_field": 29}
     sqlite> select bson_get_bson(bson_column, "path.to.some") from table;
     (returned as native BSON)
-    sqlite> create index IDX1 on table 
-    (returned as native BSON)
 
     sqlite> create index IDX1 on table ( bson_get(bdata,"hdr.id") );
+    sqlite> explain query plan select * from foo where bson_get(bdata, "hdr.id") = 'A2';
+    QUERY PLAN
+    `--SEARCH foo USING INDEX IDX1 (<expr>=?)
 
     Expose some basic scalar columns in addition to the whole BSON data:
     sqlite> create view easy_table as
