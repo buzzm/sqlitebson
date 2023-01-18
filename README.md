@@ -12,7 +12,25 @@ purposes of expressive and performant querying.
 TL;DR: You will need BSON and sqlite development C language SDKs (header files and dynamic/shared libraries); then:
 ```
     sqlite> .load bsonext sqlite_bson_init
-    sqlite> select bson_get(bson_column, "path.to.some.string") from table;
+    sqlite> select bson_get(bson_column, "path.to.some.string_field") from table;
+    hello world
+    sqlite> select bson_get(bson_column, "path.to.some.num_field") from table;
+    29
+    sqlite> select bson_get(bson_column, "path.to.some") from table;
+    {"string_field": "hello world", "num_field": 29}
+    sqlite> select bson_get_bson(bson_column, "path.to.some") from table;
+    (returned as native BSON)
+    sqlite> create index IDX1 on table 
+    (returned as native BSON)
+
+    sqlite> create index IDX1 on table ( bson_get(bdata,"hdr.id") );
+
+    Expose some basic scalar columns in addition to the whole BSON data:
+    sqlite> create view easy_table as
+    ...> select bson_get(bdata, "hdr.id") as ID, bson_get(bdata, "A.B.0") as code, bdata from table;
+
+
+    
 ```    
 
 BSON (http://bsonspec.org) is a high-performance, richly-typed data carrier
@@ -23,7 +41,7 @@ similar to JSON but offers a number of attractive features including:
     potentially introducing lossiness, and impairing native operations
     like `>` and `<=`.
  *  Roundtrip ability.  BSON is binary spec, not a string.  There is no whitespace,
-    quoting rules, etc.  BSON that goes into Postgres comes out *exactly* the
+    quoting rules, etc.  BSON that goes into sqlite comes out *exactly* the
     same way, each time, every time.
  *  Standard SDK implementations in upwards of 20 languages
 
