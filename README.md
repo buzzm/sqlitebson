@@ -11,7 +11,7 @@ purposes of expressive and performant querying.
 
 TL;DR: You will need BSON and sqlite development C language SDKs (header files and dynamic/shared libraries); then:
 ```
-    sqlite> .load bsonext sqlite_bson_init
+    sqlite> .load bsonext sqlite3_bson_init
     sqlite> select bson_get(bson_column, "path.to.some.string_field") from table;
     hello world
     sqlite> select bson_get(bson_column, "path.to.some.num_field") from table;
@@ -26,11 +26,12 @@ TL;DR: You will need BSON and sqlite development C language SDKs (header files a
     QUERY PLAN
     `--SEARCH foo USING INDEX IDX1 (<expr>=?)
 
-    Expose some basic scalar columns in addition to the whole BSON data:
+    Use views to expose some basic scalar columns to simplify some queries:
+    
     sqlite> create view easy_table as
     ...> select bson_get(bdata, "hdr.id") as ID, bson_get(bdata, "A.B.0") as code, bdata from table;
-
-
+    sqlite> select code, bson_get(bdata,"") from easy_table where ID = 'A2';
+    7|{ "hdr" : { "id" : "A2", "ts" : { "$date" : "2023-01-12T13:14:15.678Z" } }, "amt" : { "$numberDecimal" : "10.09" }, "A" : { "B" : [ 7, { "X" : "QQ", "Y" : [ "ee", "ff" ] }, 3.1415899999999998826 ] } }
     
 ```    
 
