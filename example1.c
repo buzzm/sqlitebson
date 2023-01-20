@@ -203,9 +203,8 @@ int main(int argc, char* argv[]) {
     // STRING to avoid floating pt issues:
     do_fetch(db, "select bson_get(bdata,\"amt\") from FOO where bson_get(bdata, \"hdr.id\") = \"A2\"");
 
-    // If we add some math into the expression, sqlite will 
-    // Here, asking for "amt" which is a decimal128 will cause sqlite to
-    // autoconvert the string to float and yield a float result:
+    // Here, asking for "amt" + 11.6 will cause sqlite to
+    // autoconvert the "amt" string to float and yield a float result:
     do_fetch(db, "select 11.6 + bson_get(bdata,\"amt\") from FOO where bson_get(bdata, \"hdr.id\") = \"A2\"");                
     
     // You can also use extension functions in views to pull commonly used
