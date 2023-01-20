@@ -8,7 +8,7 @@ SQL3_INCLUDE  = -I<path to sqlite3ext headers>
 SQL3_SHLIB    = -L<path to libsqlite.dynlib> -lsqlite3
 
 
-#  From here down should be OK:
+#  From here down should be OK; watch 
 INCS	= $(BSON_INCLUDE) $(SQL3_INCLUDE) 
 
 # For OS X, need to rebuild linker search path to put /usr/lib LAST:
@@ -18,11 +18,11 @@ all:	bsonext.dylib example1
 
 bsonext.dylib:	bsonext.c
 	gcc -fPIC -dynamiclib $(INCS) $(LIBS) bsonext.c -o bsonext.dylib
-	install_name_tool -change sqlite3.dylib /Users/buzz/codes/sqlite/sqlite-amalgamation-3400100/libsqlite3.dylib bsonext.dylib
+	install_name_tool -change sqlite3.dylib <path to libsqlite3.dylib> bsonext.dylib
 
 example1:  bsonext.dylib example1.c
 	gcc example1.c $(INCS) $(LIBS) -o example1
-	install_name_tool -change sqlite3.dylib /Users/buzz/codes/sqlite/sqlite-amalgamation-3400100/libsqlite3.dylib example1
+	install_name_tool -change sqlite3.dylib <path to libsqlite.dylib> example1
 
 
 clean:
