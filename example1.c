@@ -24,7 +24,8 @@ static void do_fetch(sqlite3 *db, const char* sql) {
 	printf("ERROR prep rc: %d\n", rc);
 	return;
     }
-    
+
+    printf("SQL: [%s]\n", sql);    
     while ( sqlite3_step( stmt ) == SQLITE_ROW ) { // While query has
 						   // result-rows.
 	// This makes sure we don't accidentally pick up an int AND
@@ -182,6 +183,9 @@ int main(int argc, char* argv[]) {
     create(db);
     for(int i = 0; i < 3; i++) { insert(db, i); }
 
+    // Returns int
+    do_fetch(db, "select count(*) from FOO");
+    
     // Returns binary BLOB
     do_fetch(db, "select bdata from FOO");
 

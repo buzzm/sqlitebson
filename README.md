@@ -266,7 +266,7 @@ Xcode/iOS build process.
 Building
 ========
 
-Tested using sqlite 3.40.1 2022-12-28 on OS X 10.15.7
+Tested using sqlite 3.40.1 2022-12-28 on OS X 10.15.7 and OS X 13.2
 
 Requires:
 
@@ -306,6 +306,7 @@ the linker does not help because that *appends* a path to search, not *prepend*.
 ```
 gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Z -Lbson/lib -lbson.1 -Lcodes/sqlite-amalgamation-3400100 -lsqlite3 -L/usr/lib  bsonext.c -o bsonext.dylib
 ```
+This does not seem to be an issue with OS X Venture 13.2.
 
 
 
