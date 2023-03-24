@@ -94,7 +94,7 @@ static void insert(sqlite3 *db, int nn) {
     //  Now, get the raw bytes from the BSON object to save as a BLOB:
     //
     const uint8_t* data = bson_get_data(b);
-    int32_t len = b->len;
+    int32_t len = b->len; // yes; there is no bson_get_len(b)
 
     int rc = sqlite3_prepare_v2(db, "INSERT INTO FOO (bdata) values (?)", -1, &stmt, 0 );
     if(rc != SQLITE_OK) {
