@@ -19,9 +19,11 @@
 static void do_fetch(sqlite3 *db, const char* sql) {
     sqlite3_stmt* stmt = 0;
 
+    printf("\n");
+    
     int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0 );
     if(rc != SQLITE_OK) {
-	printf("ERROR prep rc: %d\n", rc);
+	printf("** ERROR prep [%s]: rc: %d\n", sql, rc);
 	return;
     }
 
@@ -45,7 +47,7 @@ static void do_fetch(sqlite3 *db, const char* sql) {
 	    // As this point we have a BSON object (bson_t).  We
 	    // could call all sorts of bson_get_whatever on it but
 	    // for the moment 
-			   size_t jsz;
+	    size_t jsz;
 	    printf("BSON: %s\n", bson_as_canonical_extended_json (&b, &jsz));
 	    break;
 	}
@@ -186,12 +188,21 @@ int main(int argc, char* argv[]) {
     // Returns int
     do_fetch(db, "select count(*) from FOO");
     
-    // Returns binary BLOB
+    // Both return full binary BLOB; not calling bson_get_bson() is
+    // likely a bit faster...
     do_fetch(db, "select bdata from FOO");
+    do_fetch(db, "select bson_get_bson(bdata,\"\") from FOO"); // same!
+    
+    //  "to_json":
+    do_fetch(db, "select bson_to_json(bdata) from FOO");
+
+    // This is also to_json:
+    do_fetch(db, "select bson_get(bdata,\"\") from FOO");    
+    
 
     // Returns the hdr substructure but as JSON string:
     do_fetch(db, "select bson_get(bdata,\"hdr\") from FOO");
-
+    
     // Returns the hdr substructure as binary BSON
     do_fetch(db, "select bson_get_bson(bdata,\"hdr\") from FOO");
     

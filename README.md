@@ -21,16 +21,16 @@ TL;DR: You will need BSON and sqlite development C language SDKs (header files a
     sqlite> select bson_get_bson(bson_column, "path.to.some") from table;
     (returned as native BSON)
 
-    sqlite> create index IDX1 on table ( bson_get(bdata,"hdr.id") );
-    sqlite> explain query plan select * from foo where bson_get(bdata, "hdr.id") = 'A2';
+    sqlite> create index IDX1 on table ( bson_get(bson_column,"hdr.id") );
+    sqlite> explain query plan select * from foo where bson_get(bson_column, "hdr.id") = 'A2';
     QUERY PLAN
     `--SEARCH foo USING INDEX IDX1 (<expr>=?)
 
     Use views to expose some basic scalar columns to simplify some queries:
     
     sqlite> create view easy_table as
-    ...> select bson_get(bdata, "hdr.id") as ID, bson_get(bdata, "A.B.0") as code, bdata from table;
-    sqlite> select code, bson_get(bdata,"") from easy_table where ID = 'A2';
+    ...> select bson_get(bson_column, "hdr.id") as ID, bson_get(bson_column, "A.B.0") as code, bson_column from table;
+    sqlite> select code, bson_to_json(bson_column) from easy_table where ID = 'A2';
     7|{ "hdr" : { "id" : "A2", "ts" : { "$date" : "2023-01-12T13:14:15.678Z" } }, "amt" : { "$numberDecimal" : "10.09" }, "A" : { "B" : [ 7, { "X" : "QQ", "Y" : [ "ee", "ff" ] }, 3.1415899999999998826 ] } }
     
 ```    
@@ -51,85 +51,119 @@ similar to JSON but offers a number of attractive features including:
 The extension expects binary BSON to be stored in a BLOB type column.
 
 
-The extension has 2 accessors that take a BSON (BLOB)
-column and a dotpath to descend into the structure:
+Accessors
+=========
 
-*  Generic fetching where the return type is as appropriate as possible.
-   sqlite is very good at letting return values be polymorphic and then
-   interpreting their subsequent use.
-    ```
-    select bson_get(bdata, 'data.someInt32') ... return int
-    select bson_get(bdata, 'data.someInt64') ... returns int64
-    select bson_get(bdata, 'data.someDouble') ... returns double
-    select bson_get(bdata, 'data.someDecimal128') ... returns string to avoid floating point conversion issues
-    select bson_get(bdata, 'data.someDate') ... returns string
-    ```
-    If the target item is not a scalar (i.e. a substructure or array) then
-    the JSON equivalent is returned as a string.  If a "blank" dotpath is
-    supplied then no descent is made and the whole BSON object is converted
-    to JSON:
-    ```
-    select bson_get(bdata,"") ... returns JSON string of complete BSON object
-    ```
-    
-    Only the target
-    is converted to JSON, not any other fields, which improves performance.
-    For example, given a structure like this:
-    ```
-    data: {
-      hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"},
-      payload: {
-        id: "ABC123",
-        region: "EAST",
-        ( 4K of other fields and data)
-      }
+The extension has 2 accessors flavors `bson_get` and `bson_get_bson`
+that take a BSON (BLOB)
+column and a *dotpath* to descend into the structure.  A dotpath is a
+period-separated list of field names or integer offsets into an array
+that describes a path through a BSON structure.  Fancy example:
+```
+If BSON structure is
+{
+  d: {
+    fld1: {
+      foo: [
+        ["A",{"X":"corn"}],
+        ["B",{"X":3.14159}]
+      ]
+    }
+  }
+}
+
+then
+  select bson_get(bson_column, 'd.fld1.foo.0.1.X')
+yields string "corn", and
+  select bson_get(bson_column, 'd.fld1.foo.1.1.X')
+yields double 3.14159
+```
+
+## Fetching native scalar or JSON types with `bson_get`
+sqlite is very good at letting return values be polymorphic and then
+interpreting their subsequent use.
+```
+ select bson_get(bson_column, 'path.to.someInt32') ... return int
+ select bson_get(bson_column, 'path.to.someInt64') ... returns int64
+ select bson_get(bson_column, 'path.to.someDouble') ... returns double
+```
+BSON has a superset of sqllite types, however, so accommodations must be
+made for BSON `decimal128` and `datetime`:
+```
+ select bson_get(bson_column, 'path.to.someDecimal128') ... returns string to avoid floating point conversion issues e.g. "10.09"
+ select bson_get(bson_column, 'path.to.someDate') ... returns ISO-8601 string always in Z timezone e.g. 2023-01-01T12:13:14.567Z
+```
+If the dotpath target is not a scalar (i.e. a substructure or array) then
+the JSON equivalent is returned as a string:
+```
+ select bson_get(bson_column, 'path.to') ... returns JSON string e.g. {"someInt32":7, "someInt64":737727373733, ...}
+```
+
+If a "blank" dotpath is supplied then no descent is made and the whole BSON object is converted
+to JSON:
+```
+ select bson_get(bson_column,"") ... returns JSON string of complete BSON object
+```
+A natural convenience function is `bson_to_json`:
+```
+ select bson_to_json(bson_column) ... returns JSON string of complete BSON object
+```
+
+### Dotpaths are efficient at fetching targets deep in a structure
+Only the target
+is converted to JSON, not any other fields, which improves performance.
+For example, given a structure like this:
+```
+ data: {
+   hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"},
+   payload: {
+     id: "ABC123",
+     region: "EAST",
+     ( 4K of other fields and data)
    }
-   ```
-   To print just the header structure we can do this:
-   ```
-   sqlite> select bson_get(bdata,"data.hdr") from MYDATA ...
-   { hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"} }
-   ```    
-   Only a fraction of the data will be converted to JSON.
+}
+```
+To print just the header structure we can do this:
+```
+sqlite> select bson_get(bson_column,"data.hdr") from MYDATA ...
+{ hdr: {type: "X", ts: "2023-01-01T12:13:14Z", subtype: "A"} }
+```    
+Only a fraction of the data will be converted to JSON.
 
-   Similarly, suppose we wish to capture the `id` for those documents
-   where `hdr` is of type `X`.  Converting the `data` to JSON
-   means converting the *entire* structure including 4K of other fields that
-   we don't need to process; instead, we do this:
-   ```
-   select bson_get(bdata, "data.payload.id") from table
-      where bson_get(bdata, "data.hdr.type") = 'X';
-   ```
-   In the extension, the BSON C SDK is being called with the dotpath to
-   performantly descend into the structure.  The 4K of other fields are
-   never converted to JSON yielding significant performance improvement. 
+Similarly, suppose we wish to capture the `id` for those documents
+where `hdr` is of type `X`.  Converting the `data` to JSON
+means converting the *entire* structure including 4K of other fields that
+we don't need to process; instead, we do this:
+```
+select bson_get(bson_column, "data.payload.id") from table
+   where bson_get(bson_column, "data.hdr.type") = 'X';
+```
+In the extension, the BSON C SDK is being called with the dotpath to
+performantly descend into the structure.  The 4K of other fields are
+never converted to JSON yielding significant performance improvement. 
+ `bson_get()` is a deterministic and innocuous function and therefore
+is suitable for use in functional indexes e.g.
+```
+create index XX on MYDATA (bson_get(bson_column, "data.payload.id"));
+```
 
-   `bson_get()` is a deterministic and innocuous function and therefore
-   is suitable for use in functional indexes e.g.
-   ```
-   create index XX on MYDATA (bson_get(bdata, "data.payload.id"));
-   ```
+## Fetching BSON substructures with `bson_get_bson`
+```
+ select bson_get_bson(bson_column, 'path.to') ... returns BSON raw bytes representing structure with someInt32, someInt64, etc.
+```
+This will return the whole `path.to` substructure in native binary BSON.
+Binary data is not particularly useful in the CLI but in actual sqlite
+client-side programs, the row-column returned by `sqlite_step()` and then
+`sqlite3_column_blob()` is easily initialized into a BSON object and 
+manipulated with the BSON SDK.  This allows client side programs to avoid
+potentially lossy to- and from- JSON conversion e.g. floating point of
+6.0 gets emitted as 6 then reparsed as an int.  See Example below.
 
-
-
-*  Native BSON substructures e.g. <br>
-    ```
-    select bson_get_bson(bdata, 'data.payload') ...
-    ```
-    This will return the whole payload substructure in native binary BSON.
-    Binary data is not particularly useful in the CLI but in actual sqlite
-    client-side programs, the row-column returned by `sqlite_step()` and then
-    `sqlite3_column_blob()` is easily initialized into a BSON object and 
-    manipulated with the BSON SDK.  This allows client side programs to avoid
-    potentially lossy to- and from- JSON conversion e.g. floating point of
-    6.0 gets emitted as 6 then reparsed as an int.  See Example below.
-
-    Note there is no purpose in calling `bson_get_bson()` with a blank dotpath;
-    this is equivalent to simply returning the raw BLOB:
-    ```
-    select bdata from  ... returns native binary BSON of complete BSON object
-    ```
-    
+Unlike `bson_get`, there is no added value in calling `bson_get_bson()`
+with a blank dotpath because this is equivalent to simply returning the raw BSON BLOB column:
+```
+select bson_column from  ... returns native binary BSON of complete BSON object
+```
     
     
 
@@ -147,12 +181,11 @@ Makefile highlighting the workarounds for OS X `/usr/lib/libsqlite.dynlib`
 issue should get you going.  Linux and other targets pretty much use the
 same simple compile/link line except with `.so` instead of `.dynlib`, etc.
 
+Note that sqlite doesn't really care about the column type name!
+sqlite> create table MYDATA ( bson_column BSON );
 
 Dealing with binary BSON through the CLI is not very interesting
 so let's make a little program to insert some data.
-
-    Note that sqlite doesn't really care about the column type name!
-    sqlite> create table MYDATA ( bdata BSON );
 
     #include <stdio.h>
     #include <sqlite3.h>
@@ -184,7 +217,7 @@ so let's make a little program to insert some data.
 
 	// Normally you should check the return value for success for each
 	// of these calls but for clarity we omit them here:
-	sqlite3_prepare_v2(db, "INSERT INTO MYDATA (bdata) values (?)", -1, &stmt, 0 );
+	sqlite3_prepare_v2(db, "INSERT INTO MYDATA (bson_column) values (?)", -1, &stmt, 0 );
 	// 
 	sqlite3_bind_blob( stmt, 1, (const void*) data, len, SQLITE_STATIC);
 	sqlite3_step( stmt ); // Doing an insert means we expect a single result DONE back:
@@ -218,18 +251,18 @@ Then back in the sqlite CLI:
     entry point is always the same:  sqlite3_bson_init
     sqlite> .load path/to/bsonext sqlite3_bson_init
 
-    sqlite> select bson_get(bdata,"") from MYDATA where bson_get(bdata, "hdr.id") = 'A34';
-    { "hdr" : { "id" : "A34", "ts" : { "$date" : "2023-01-12T13:14:15.678Z" } }, "amt" : { "$numberDecimal" : "10.09" }, "A" : { "B" : [ 7, { "X" : "QQ", "Y" : [ "ee", "ff" ] } ] } }
+    sqlite> select bson_to_json(bson_column) from MYDATA where bson_get(bson_column, "hdr.id") = 'A7';
+    { "hdr" : { "id" : "A7", "ts" : { "$date" : "2023-01-12T13:14:15.678Z" } }, "amt" : { "$numberDecimal" : "10.09" }, "A" : { "B" : [ 7, { "X" : "QQ", "Y" : [ "ee", "ff" ] } ] } }
 
-    sqlite> select bson_get(bdata, "amt") / 2 from foo where bson_get(bdata, "hdr.id") = 'A12';
+    sqlite> select bson_get(bson_column, "amt")/2 from foo where bson_get(bson_column, "hdr.id") = 'A3';
     5.045
 
 
 Querying in a client-side program:
 
-    int rc = sqlite3_prepare_v2(db, "SELECT bdata from MYDATA WHERE bson_get(bdata, \"hdr.id\") = ?", -1, &stmt, 0 );    
+    int rc = sqlite3_prepare_v2(db, "SELECT bson_column from MYDATA WHERE bson_get(bson_column, \"hdr.id\") = ?", -1, &stmt, 0 );    
 
-    rc = sqlite3_bind_text( stmt, 1, "A34", -1, SQLITE_STATIC);
+    rc = sqlite3_bind_text( stmt, 1, "A3", -1, SQLITE_STATIC);
 
     while ( sqlite3_step( stmt ) == SQLITE_ROW ) {
 	if(sqlite3_column_type(stmt,0) != SQLITE_NULL) {

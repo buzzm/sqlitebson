@@ -75,41 +75,48 @@ static void bson_get_bson_func(
   if(!_init_bson(&b, argv)) {
       sqlite3_result_error(context, "invalid BSON", -1);
   } else {
-      char* dotpath = (char*) sqlite3_value_text(argv[1]);
-    
-      bool rc = false;
+      uint32_t subdoc_len;
+      const uint8_t* subdoc_data = 0;
 
-      bson_iter_t target;
-      bson_iter_t iter;
-      if (bson_iter_init (&iter, &b)) {
-	  rc = bson_iter_find_descendant(&iter, dotpath, &target);
-      }
-      
-      if(rc) {
-	  uint32_t subdoc_len;
-	  const uint8_t* subdoc_data = 0;
+      char* dotpath = (char*) sqlite3_value_text(argv[1]);
+
+      if(dotpath[0] == '\0') {
+	  subdoc_len = b.len;
+	  subdoc_data = bson_get_data(&b);
+
+      } else {
+	  bool rc = false;
 	  
-	  bson_type_t ft = bson_iter_type(&target);
-	  switch(ft) {
-	  case BSON_TYPE_DOCUMENT:  {
-	      bson_iter_document(&target, &subdoc_len, &subdoc_data);
-	      break;
+	  bson_iter_t target;
+	  bson_iter_t iter;
+	  if (bson_iter_init (&iter, &b)) {
+	      rc = bson_iter_find_descendant(&iter, dotpath, &target);
 	  }
-	  case BSON_TYPE_ARRAY:  {
-	      bson_iter_array(&target, &subdoc_len, &subdoc_data);
-	      break;
+	  
+	  if(rc) {
+	      bson_type_t ft = bson_iter_type(&target);
+	      switch(ft) {
+	      case BSON_TYPE_DOCUMENT:  {
+		  bson_iter_document(&target, &subdoc_len, &subdoc_data);
+		  break;
+	      }
+	      case BSON_TYPE_ARRAY:  {
+		  bson_iter_array(&target, &subdoc_len, &subdoc_data);
+		  break;
+	      }
+	      default: {
+		  // ?  TBD How to "better" handle "object representation" of
+		  // noncomplex types
+	      }
+	      }
 	  }
-	  default: {
-	      // ?  TBD How to "better" handle "object representation" of
-	      // noncomplex types
-	  }
-	  }
-	  if(subdoc_data != 0) {
-	      void* zOut = sqlite3_malloc(subdoc_len);
-	      memcpy(zOut, subdoc_data, subdoc_len);
-	      sqlite3_result_blob(context, zOut, subdoc_len, SQLITE_TRANSIENT);
-	      sqlite3_free(zOut);
-	  }
+      }
+
+      if(subdoc_data != 0) {
+	  void* zOut = sqlite3_malloc(subdoc_len);
+	  memcpy(zOut, subdoc_data, subdoc_len);
+	  sqlite3_result_blob(context, zOut, subdoc_len, SQLITE_TRANSIENT);
+	  sqlite3_free(zOut);
       }
   }
 }
@@ -264,6 +271,26 @@ static void bson_get_func(
     }
 }
 
+static void bson_to_json_func(
+  sqlite3_context *context,
+  int argc,
+  sqlite3_value **argv
+){
+    assert( argc==1 );
+
+    // If not a BLOB (also picks up if NULL) then don't even try to init:
+    if( sqlite3_value_type(argv[0]) != SQLITE_BLOB) return;
+
+    bson_t b;
+    if(!_init_bson(&b, argv)) {
+	sqlite3_result_error(context, "invalid BSON", -1);
+    } else {
+	_set_json(context, &b);
+    }
+}
+
+
+
 
 
 #ifdef _WIN32
@@ -282,10 +309,15 @@ int sqlite3_bson_init(
                    SQLITE_UTF8|SQLITE_INNOCUOUS|SQLITE_DETERMINISTIC,
                    0, bson_get_func, 0, 0);
 
+  // Nice convenience; same as bson_get(bson_column, ""):
+  rc = sqlite3_create_function(db, "bson_to_json", 1,
+                   SQLITE_UTF8|SQLITE_INNOCUOUS|SQLITE_DETERMINISTIC,
+                   0, bson_to_json_func, 0, 0);  
+
   rc = sqlite3_create_function(db, "bson_get_bson", 2,
                    SQLITE_UTF8|SQLITE_INNOCUOUS|SQLITE_DETERMINISTIC,
-                   0, bson_get_bson_func, 0, 0);        
-  
+                   0, bson_get_bson_func, 0, 0);
+
   return rc;
 }
 
