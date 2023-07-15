@@ -91,7 +91,17 @@ BSON has a superset of sqllite types, however, so accommodations must be
 made for BSON `decimal128` and `datetime`:
 ```
  select bson_get(bson_column, 'path.to.someDecimal128') ... returns string to avoid floating point conversion issues e.g. "10.09"
- select bson_get(bson_column, 'path.to.someDate') ... returns ISO-8601 string always in Z timezone e.g. 2023-01-01T12:13:14.567Z
+
+
+ select bson_get(bson_column, 'path.to.someDate') ... returns ISO-8601 string always with millis and in Z timezone e.g. 2023-01-01T12:13:14.567Z
+
+ To compare dates, convert to integer using unixepoch().  For example, to fetch
+ all dates after 2023-01-12:
+
+ select 1 where unixepoch(bson_get(bson_column, 'path.to.someDate')) > unixepoch('2023-01-12');
+
+ Note unixepoch() takes date and ISO-8601 datetimes as arguments.
+
 ```
 If the dotpath target is not a scalar (i.e. a substructure or array) then
 the JSON equivalent is returned as a string:
