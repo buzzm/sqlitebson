@@ -1,4 +1,4 @@
-// Copyright (c) 2022  Buzz Moschetti <buzz.moschetti@gmail.com>
+// Copyright (c) 2022-2024  Buzz Moschetti <buzz.moschetti@gmail.com>
 // 
 // Permission to use, copy, modify, and distribute this software and its documentation for any purpose, without fee, and without a written agreement is hereby granted,
 // provided that the above copyright notice and this paragraph and the following two paragraphs appear in all copies.
@@ -42,8 +42,25 @@ static bool _init_bson(
     sqlite3_value **argv
     )
 {
+/*
+  From https://www.sqlite.org/c3ref/value_blob.html:
+  Please pay particular attention to the fact that the pointer returned from
+    sqlite3_value_blob(),
+    sqlite3_value_text(),
+    sqlite3_value_text16()
+  **can** be invalidated by a subsequent call to
+    sqlite3_value_bytes(),
+    sqlite3_value_bytes16(),
+    sqlite3_value_text(),
+    sqlite3_value_text16().
+
+  That **can** depends on if type conversion results from trying to get
+  appropriate length of data pointer -- which is not an issue for
+  BLOBs here.   Great explain at:
+  https://sqlite.org/forum/info/5165df43db42e86f6dd027189340099174f24f553b157ecf6e7bc2e40224ff32
+*/    
     const void* bson = sqlite3_value_blob(argv[0]);
-    int bson_len = sqlite3_value_bytes(argv[0]);  
+    int bson_len = sqlite3_value_bytes(argv[0]);
 
     // This does a sort of OK job at sniffing the BSON to see if it
     // is OK....
@@ -71,7 +88,7 @@ static void bson_get_bson_func(
   // If not a BLOB (also picks up if NULL) then don't even try to init:
   if( sqlite3_value_type(argv[0]) != SQLITE_BLOB) return;
 
-  bson_t b;
+  bson_t b; // on stack;
   if(!_init_bson(&b, argv)) {
       sqlite3_result_error(context, "invalid BSON", -1);
   } else {
@@ -113,10 +130,10 @@ static void bson_get_bson_func(
       }
 
       if(subdoc_data != 0) {
-	  void* zOut = sqlite3_malloc(subdoc_len);
-	  memcpy(zOut, subdoc_data, subdoc_len);
-	  sqlite3_result_blob(context, zOut, subdoc_len, SQLITE_TRANSIENT);
-	  sqlite3_free(zOut);
+	  // Everything up to this point was pointers to pointers to pointers
+	  // in the incoming sqlite3_value_bytes(argv[0]); no new mallocs
+	  // so nothing extra to free; let TRANSIENT copy it out and we're done
+	  sqlite3_result_blob(context, subdoc_data, subdoc_len, SQLITE_TRANSIENT);	  
       }
   }
 }
@@ -133,11 +150,8 @@ static void extract_and_set_context(
     case BSON_TYPE_UTF8: {
 	uint32_t len;		
 	const char* txt = bson_iter_utf8(p_target, &len); // NO NEED TO free()
-	char* zOut = sqlite3_malloc(strlen(txt)+1);
-	(void) strcpy(zOut, txt);
-	
-	sqlite3_result_text(context, zOut, len, SQLITE_TRANSIENT);
-	sqlite3_free(zOut);
+	// DEF need TRANSIENT here to copy that string...
+	sqlite3_result_text(context, txt, len, SQLITE_TRANSIENT);
 	break;
     }
     case BSON_TYPE_DOUBLE: {
@@ -207,22 +221,26 @@ static void extract_and_set_context(
 	// What to do with subtype?  Dunno!
 	bson_iter_binary (p_target, &subtype, &len, &data);
 	
-	// Output is "\x54252031..."  So 2 bytes for "\x",
-	// then 2 slots to hold hex rep for each byte, plus 1 for NULL:
-	char* tmpp = sqlite3_malloc(2 + (len*2) + 1);
+	// sqlite likes binary hex input in this form ; here is [hello!]:
+	//    insert into zzz (f) values (x'68656c6c6f21');
+	// So given the convention that the output representation should
+	// be whatever goes between single quotes, our rep will be
+	//    68656c6c6f21 
+	// No need for space for NULL; we will build a buf and know the
+	// len to give to sqlite3_result_text:
 	
-	tmpp[0] = '\\';
-	tmpp[1] = 'x';
-	int idx = 2;
+	char* tmpp = sqlite3_malloc(len*2);
+	
+	int idx = 0;
 	for(int n = 0; n < len; n++) {
 	    // Love that pointer math....
 	    sprintf(tmpp+idx, "%02x", (uint8_t)data[n]);
 	    idx += 2;
 	}
-	tmpp[idx] = '\0';
 	
-	sqlite3_result_text(context, tmpp, -1, SQLITE_TRANSIENT);
-	sqlite3_free(tmpp);
+	// Since we are using sqlite3_malloc to make the buffer, we can use
+	// sqlite_free as arg 4 to destroy tmpp:
+	sqlite3_result_text(context, tmpp, idx, sqlite3_free);	
 	break;
     }
 	
@@ -290,7 +308,33 @@ static void bson_to_json_func(
 }
 
 
+static void bson_from_json_func(
+  sqlite3_context *context,
+  int argc,
+  sqlite3_value **argv
+){
+    assert( argc==1 );
 
+    char* jsons = (char*) sqlite3_value_text(argv[0]);
+    int slen = strlen(jsons);
+
+    bson_error_t err; // on stack
+    bson_t* b = bson_new_from_json((const uint8_t *)jsons, slen, &err);
+    
+    if(b != NULL) {
+	// b->len is The Official way to get length of bson_t* b.
+	// SQLITE_TRANSIENT will safe-copy our data...
+	sqlite3_result_blob(context, bson_get_data(b), b->len, SQLITE_TRANSIENT);
+	// ...and now we must free it here with bson_destroy,
+	// not free or sqlite3_free.  We also cannot pass bson_destroy as
+	// arg 4 to sqlite3_result_blob
+	bson_destroy(b);
+
+	
+    } else {
+	sqlite3_result_error(context, "cannot parse EJSON", -1);	
+    }
+}
 
 
 #ifdef _WIN32
@@ -318,6 +362,12 @@ int sqlite3_bson_init(
                    SQLITE_UTF8|SQLITE_INNOCUOUS|SQLITE_DETERMINISTIC,
                    0, bson_get_bson_func, 0, 0);
 
+  // Easier way to insert EJSON into BLOB column:
+  rc = sqlite3_create_function(db, "bson_from_json", 1,
+                   SQLITE_UTF8|SQLITE_INNOCUOUS|SQLITE_DETERMINISTIC,
+                   0, bson_from_json_func, 0, 0);  
+
+  
   return rc;
 }
 

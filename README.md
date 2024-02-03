@@ -7,30 +7,64 @@ Introduction
 ============
 
 This sqlite extension provides accessor functions to the BSON data type for the
-purposes of expressive and performant querying.
+purposes of expressive and performant querying of richly shaped, portable data
+i.e. it has an SDK outside of sqlite.
 
-TL;DR: You will need BSON and sqlite development C language SDKs (header files and dynamic/shared libraries); then:
+TL;DR: You will need BSON and sqlite development C language SDKs (header files and dynamic/shared libraries); then after building the extension:
 ```
-    sqlite> .load bsonext sqlite3_bson_init
-    sqlite> select bson_get(bson_column, "path.to.some.string_field") from table;
-    hello world
-    sqlite> select bson_get(bson_column, "path.to.some.num_field") from table;
-    29
-    sqlite> select bson_get(bson_column, "path.to.some") from table;
-    {"string_field": "hello world", "num_field": 29}
-    sqlite> select bson_get_bson(bson_column, "path.to.some") from table;
-    (returned as native BSON)
+    $ sqlite3 
 
-    sqlite> create index IDX1 on table ( bson_get(bson_column,"hdr.id") );
-    sqlite> explain query plan select * from foo where bson_get(bson_column, "hdr.id") = 'A2';
+.load <path to where you built bsonext.so/.dynlib> sqlite3_bson_init
+Usually you will build bsonext.so in the same directory so no extra path
+components are needed.  'sqlite3_bson_init' is fixed; it is the interface function.
+
+    sqlite> .load bsonext sqlite3_bson_init
+    sqlite> create table bsontest (bdata BSON); -- see below about column types
+
+There is no autocasting in sqlite3 like in postgres and inserting binary
+data at the CLI is possible but ugly so the extension provides a
+from-json function to convert EJSON to binary BSON:
+
+    sqlite> insert into bsontest (bdata) values (bson_from_json('{"hdr":{"id":"A0", "ts":{"$date":"2023-01-12T13:14:15.678Z"}}, "amt":{"$numberDecimal":"10.09"},  "A":{"B":[ 7 ,{"X":"QQ", "Y":["ee","ff"]}, 3.14159  ]} }'));
+
+This is the same thing in direct BSON binary (created separately.  Below is NOT
+the hex-encoded version of the JSON string above; it is hex-encoded binary BSON:
+    sqlite> insert into bsontest (bdata) values (x'8b00000003686472001c000000026964000300000041300009747300fee61da6850100000013616d7400f1030000000000000000000000003c300341004d00000004420045000000103000070000000331002b0000000258000300000051510004590019000000023000030000006565000231000300000066660000000132006e861bf0f9210940000000');
+
+Remember, in sqlite, "what you insert is what you get" so the following will
+just insert JSON as string that cannot be used by the BSON functions:
+    sqlite> insert into bsontest (bdata) values ('{"hdr":{"id":"A0", "ts":{"$date":"2023-01-12T13:14:15.678Z"}}, "amt":{"$numberDecimal":"10.09"},  "A":{"B":[ 7 ,{"X":"QQ", "Y":["ee","ff"]}, 3.14159  ]} }'); -- stored as a string, never mind the BSON column "type"
+    
+
+    sqlite> select bson_get(bdata, 'hdr.id') from bsontest;
+    A0
+
+Dotpaths can contain string names and >=0 integer offsets into arrays:
+    sqlite> select bson_get(bdata, 'A.B.0') from bsontest;
+    7
+
+Dates are returned as ISO 8601 strings:
+    sqlite> select bson_get(bdata, 'hdr.ts') from bsontest;
+    2023-01-12T13:14:15.678Z
+
+If the dotpath ends at an array or object, an EJSON representation is returned;
+note how datetime field ts is special:
+    sqlite> select bson_get(bdata, 'hdr') from bsontest;
+    { "id" : "A0", "ts" : { "$date" : "2023-01-12T13:14:15.678Z" } }
+
+    sqlite> select bson_get_bson(bdata, 'hdr') from bsontest;
+    (returned as native BSON (internally a BLOB) so nothing prints in CLI)
+
+    sqlite> create index IDX1 on bsontest ( bson_get(bdata,'hdr.id') );
+    sqlite> explain query plan select * from bsontest where bson_get(bdata, 'hdr.id') = 'A0';
     QUERY PLAN
-    `--SEARCH foo USING INDEX IDX1 (<expr>=?)
+    `--SEARCH bsontest USING INDEX IDX1 (<expr>=?)
 
     Use views to expose some basic scalar columns to simplify some queries:
     
     sqlite> create view easy_table as
-    ...> select bson_get(bson_column, "hdr.id") as ID, bson_get(bson_column, "A.B.0") as code, bson_column from table;
-    sqlite> select code, bson_to_json(bson_column) from easy_table where ID = 'A2';
+    ...> select bson_get(bdata, 'hdr.id') as ID, bson_get(bdata, 'A.B.0') as code, bdata from bsontest;
+    sqlite> select code, bson_to_json(bdata) from easy_table where ID = 'A0';
     7|{ "hdr" : { "id" : "A2", "ts" : { "$date" : "2023-01-12T13:14:15.678Z" } }, "amt" : { "$numberDecimal" : "10.09" }, "A" : { "B" : [ 7, { "X" : "QQ", "Y" : [ "ee", "ff" ] }, 3.1415899999999998826 ] } }
     
 ```    
@@ -88,9 +122,18 @@ interpreting their subsequent use.
  select bson_get(bson_column, 'path.to.someDouble') ... returns double
 ```
 BSON has a superset of sqllite types, however, so accommodations must be
-made for BSON `decimal128` and `datetime`:
+made for BSON `decimal128`, `datetime`, and `binary`:
 ```
  select bson_get(bson_column, 'path.to.someDecimal128') ... returns string to avoid floating point conversion issues e.g. "10.09"
+
+ select bson_get(bson_column, 'path.to.someBinary') ... returns hex-encoded string of bytes
+
+ We return only te hex-encoded bytes and not the x'' syntax wrapper to simplify
+ consumption by client-side programs for which the x'' wrapper has no value.
+ For those use cases where you wish to put the bytes back into sqlite as a
+ binary, use bson_get_bson:
+ 
+ UPDATE bsontest SET bdata2 = bson_get_bson(bdata,'thumbnail');
 
 
  select bson_get(bson_column, 'path.to.someDate') ... returns ISO-8601 string always with millis and in Z timezone e.g. 2023-01-01T12:13:14.567Z
@@ -118,6 +161,60 @@ A natural convenience function is `bson_to_json`:
 ```
  select bson_to_json(bson_column) ... returns JSON string of complete BSON object
 ```
+
+### JSON return types can be processed by native sqlite JSON functions
+
+sqlite has a wealth of JSON functions which can be brought to bear on the
+JSON returned by `bson_get`:
+```
+sqlite> select json_extract(bson_get(bdata,'A'),'$.B') from foo limit 1;
+[7,{"X":"QQ","Y":["ee","ff"]},3.1415899999999998826]
+
+sqlite> select json_array_length(json_extract(bson_get(bdata,'A'),'$.B')) from foo limit 1;
+3
+```
+Here is a more sophisticated and useful example.  Consider this BSON shape with
+and array of payments.  Payments have high-fidelity dates and, more important,
+penny-precise amount which we do not want to lose with JSON.  We insert and
+convert EJSON to BSON, then use the sqlite JSON functions without damaging the
+data that ultimately can be extracted as BSON again.  Of course, it is most
+likely that the data would have been programmatically inserted as regular
+BSON as a BLOB but we show off EJSON here:
+```
+delete from FOO;
+
+insert into FOO (bdata) values (bson_from_json('
+{"name":"Bob",
+ "address": "here",
+ "payments":[
+   {"date":{"$date":"2024-01-01T12:00:00Z"},"amt":{"$numberDecimal":"123.45"}}
+   ,{"date":{"$date":"2024-01-05T08:30:00Z"},"amt":{"$numberDecimal":"99.99"}}
+   ,{"date":{"$date":"2024-01-09T08:30:00Z"},"amt":{"$numberDecimal":"66.78"}} 
+   ,{"date":{"$date":"2024-01-13T08:30:00Z"},"amt":{"$numberDecimal":"-4.45"}}
+   ,{"date":{"$date":"2024-02-05T12:00:00Z"},"amt":{"$numberDecimal":"10.09"}}
+   ]	
+}   
+'));
+
+select 'All material:';
+select bson_to_json(bdata) from FOO;
+
+select '';
+select 'Look at the last 2 payments:';
+select json_extract(bson_to_json(bdata),'$.payments[#-2]','$.payments[#-1]') from FOO;
+
+
+select '';
+select 'Remove first payment (2024-01-01) and update; note to_json/from_json:';
+update FOO set bdata = bson_from_json(json_remove(bson_to_json(bdata),'$.payments[0]'));
+
+select bson_to_json(bdata) from FOO;
+```
+
+
+
+
+
 
 ### Dotpaths are efficient at fetching targets deep in a structure
 Only the target
@@ -167,7 +264,13 @@ client-side programs, the row-column returned by `sqlite_step()` and then
 `sqlite3_column_blob()` is easily initialized into a BSON object and 
 manipulated with the BSON SDK.  This allows client side programs to avoid
 potentially lossy to- and from- JSON conversion e.g. floating point of
-6.0 gets emitted as 6 then reparsed as an int.  See Example below.
+6.0 gets emitted as 6 then reparsed as an int.  `bson_get_bson` is
+unquestionably the preferred retrieval method for client-side programs.
+See Example below.
+
+Calling `bson_get_bson` in combination with dotpaths to access deeply nested
+structures and indexes makes for a very high performance, high fidelity
+data retrieval environment.
 
 Unlike `bson_get`, there is no added value in calling `bson_get_bson()`
 with a blank dotpath because this is equivalent to simply returning the raw BSON BLOB column:
@@ -309,7 +412,9 @@ Xcode/iOS build process.
 Building
 ========
 
-Tested using sqlite 3.40.1 2022-12-28 on OS X 10.15.7 and OS X 13.2
+Tested on
+sqlite3 3.40.1 2022-12-28 on OS X 10.15.7 and OS X 13.2
+sqlite3 3.45.1 2024-02-01 on OS X 13.2
 
 Requires:
 
