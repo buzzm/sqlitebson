@@ -14,7 +14,7 @@ INCS	= $(BSON_INCLUDE) $(SQL3_INCLUDE)
 # For OS X, need to rebuild linker search path to put /usr/lib LAST:
 LIBS	= -Z $(BSON_SHLIB) $(SQL3_SHLIB) -L/usr/lib
 
-all:	bsonext.dylib example1
+all:	bsonext.dylib example1 test1
 
 bsonext.dylib:	bsonext.c
 	gcc -fPIC -dynamiclib $(INCS) $(LIBS) bsonext.c -o bsonext.dylib
@@ -24,6 +24,8 @@ example1:  bsonext.dylib example1.c
 	gcc example1.c $(INCS) $(LIBS) -o example1
 	install_name_tool -change sqlite3.dylib <path to libsqlite.dylib> example1
 
+test1:  bsonext.dylib test1.c
+	$(GCC) test1.c $(INCS) $(LIBS) -o test1
 
 clean:
 	rm -f bsonext.dylib example1 *~ *.o

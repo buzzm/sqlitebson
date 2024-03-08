@@ -128,7 +128,7 @@ made for BSON `decimal128`, `datetime`, and `binary`:
 
  select bson_get(bson_column, 'path.to.someBinary') ... returns hex-encoded string of bytes
 
- We return only te hex-encoded bytes and not the x'' syntax wrapper to simplify
+ We return only the hex-encoded bytes and not the x'' syntax wrapper to simplify
  consumption by client-side programs for which the x'' wrapper has no value.
  For those use cases where you wish to put the bytes back into sqlite as a
  binary, use bson_get_bson:
@@ -175,7 +175,7 @@ sqlite> select json_array_length(json_extract(bson_get(bdata,'A'),'$.B')) from f
 ```
 Here is a more sophisticated and useful example.  Consider this BSON shape with
 and array of payments.  Payments have high-fidelity dates and, more important,
-penny-precise amount which we do not want to lose with JSON.  We insert and
+penny-precise amounts which we do not want to lose with JSON.  We insert and
 convert EJSON to BSON, then use the sqlite JSON functions without damaging the
 data that ultimately can be extracted as BSON again.  Of course, it is most
 likely that the data would have been programmatically inserted as regular
@@ -413,8 +413,11 @@ Building
 ========
 
 Tested on
-sqlite3 3.40.1 2022-12-28 on OS X 10.15.7 and OS X 13.2
-sqlite3 3.45.1 2024-02-01 on OS X 13.2
+
+ * sqlite3 3.40.1 OS X 10.15.7 and OS X 13.2  2022-12-28
+ * sqlite3 3.45.1
+   *  OS X 13.2  2024-02-01
+   *  OS X 14.3.1 2024-03-08  Apple clang version 15.0.0 (clang-1500.1.0.2.5)
 
 Requires:
 
@@ -454,7 +457,7 @@ the linker does not help because that *appends* a path to search, not *prepend*.
 ```
 gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Z -Lbson/lib -lbson.1 -Lcodes/sqlite-amalgamation-3400100 -lsqlite3 -L/usr/lib  bsonext.c -o bsonext.dylib
 ```
-This does not seem to be an issue with OS X Venture 13.2.
+This does not seem to be an issue with OS X Ventura 13.2.
 
 
 
