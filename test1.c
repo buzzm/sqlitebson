@@ -17,6 +17,48 @@
 
 char err_buf[1024]; // nice big err msg buffer...
 
+static char* basic_changes_test(sqlite3 *db, const char* sql, int exp_changes)
+{
+    sqlite3_stmt* stmt = 0;
+
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0 );
+    if(rc != SQLITE_OK) {
+	sprintf(err_buf, "sqlite3_prepare_v2 [%s]: rc: %d\n", sql, rc);
+	return err_buf;
+    }
+
+    rc = sqlite3_step(stmt);
+    if(rc != SQLITE_DONE) {
+	sprintf(err_buf, "sqlite3_step [%s]: did not return DONE\n", sql);
+	return err_buf;	
+    }
+
+    int act_changes = sqlite3_changes(db);
+    if(act_changes != exp_changes) {    
+	sprintf(err_buf, "sqlite3_changes [%s]: expect [%d], got [%d]\n", sql, exp_changes, act_changes);
+	return err_buf;	
+    }
+
+    //  Step, Clear and Reset the statement after each bind.
+    rc = sqlite3_clear_bindings( stmt );
+    rc = sqlite3_reset( stmt );
+    rc = sqlite3_finalize( stmt );  //  Finalize the prepared stat
+
+    return 0;  // OK    
+}
+
+static void exec_bct(sqlite3 *db, const char* desc, const char* sql, int exp_changes)
+{
+    char* err;
+    printf("%s ... ", desc);
+    if((err = basic_changes_test(db, sql, exp_changes)) != NULL) {
+	printf("FAIL; %s: [%s]\n", sql, err);
+    } else {
+	printf("ok\n");
+    }	
+}
+    
+
 static char* basic_scalar_test(sqlite3 *db, const char* sql, bson_type_t exp_type, const void* exp_value)
 {
     sqlite3_stmt* stmt = 0;
@@ -90,6 +132,18 @@ static char* basic_scalar_test(sqlite3 *db, const char* sql, bson_type_t exp_typ
 
     return 0;  // OK
 }
+
+static void exec_bst(sqlite3 *db, const char* desc, const char* sql, bson_type_t exp_type, const void* exp_value)
+{
+    char* err;
+    printf("%s ... ", desc);
+    if((err = basic_scalar_test(db, sql, exp_type, exp_value)) != NULL) {
+	printf("FAIL; %s: [%s]\n", sql, err);
+    } else {
+	printf("ok\n");
+    }	
+}
+
 
 static int insert(sqlite3 *db) {
     sqlite3_stmt* stmt = 0;
@@ -191,7 +245,7 @@ int activate_extension(sqlite3 *db)
     return 0; // OK
 }
 
-struct test {
+struct scalar_test {
     const char* name;
     char* (*f)(sqlite3*,const char*,bson_type_t,const void*);
     const char* a1;
@@ -199,7 +253,16 @@ struct test {
     const void* a3;
 };
 
-	
+struct changes_test {
+    const char* name;
+    char* (*f)(sqlite3*,const char*,int exp_changes);
+    const char* a1; // sql
+    int a2; // exp changes
+};
+
+
+#define DO_TEST(f) (
+
 /*
   usage:  test1 [ someFile.sqlite3 ]
  */
@@ -225,6 +288,9 @@ int main(int argc, char* argv[]) {
 
     //basic_scalar_test(db, "select bson_get(bdata,'hdr.id') from bsontest", BSON_TYPE_UTF8, "A0");    
 
+    int zval = 0;
+    int oval = 1;        
+    
     double dval = 3.14159;
     int ival = 7;
     long lval = 743859238573L;
@@ -240,7 +306,7 @@ int main(int argc, char* argv[]) {
     bval[idx] = '\0';
 
 
-    struct test XXX[] = {
+    struct scalar_test XXX[] = {
 	{"string exists", basic_scalar_test, "select bson_get(bdata,'hdr.id') from bsontest", BSON_TYPE_UTF8, "A0"},
 
 	{"field !exists", basic_scalar_test, "select bson_get(bdata,'not.here') from bsontest", BSON_TYPE_NULL, 0},
@@ -259,22 +325,24 @@ int main(int argc, char* argv[]) {
 	// emerge as strings:
 	{"date exists", basic_scalar_test, "select bson_get(bdata,'hdr.ts') from bsontest", BSON_TYPE_UTF8, "2023-01-12T13:14:15.678Z"},
 	{"decimal exists", basic_scalar_test, "select bson_get(bdata,'amt') from bsontest", BSON_TYPE_UTF8, "10.09"},
-	{"binary exists", basic_scalar_test, "select bson_get(bdata,'thumbnail') from bsontest", BSON_TYPE_UTF8, &bval},			
-
-	
-
+	{"binary exists", basic_scalar_test, "select bson_get(bdata,'thumbnail') from bsontest", BSON_TYPE_UTF8, &bval},
     };
 
-    
-    for(int q = 0; q < sizeof(XXX)/sizeof(struct test); q++) {
-	printf("%s ... ", XXX[q].name);
-	char* msg = XXX[q].f(db,XXX[q].a1, XXX[q].a2, XXX[q].a3);
-	if(msg != NULL) {
-	    printf("FAIL; %s: [%s]\n", msg, XXX[q].a1);
-	} else {
-	    printf("ok\n");
-	}
+    for(int q = 0; q < sizeof(XXX)/sizeof(struct scalar_test); q++) {
+	exec_bst(db,XXX[q].name, XXX[q].a1, XXX[q].a2, XXX[q].a3);
     }
+
+    
+
+    exec_bct(db,"internal BSON copy", "update bsontest set bdata2 = bdata", 1);
+    exec_bst(db,"internal BSON copy verify", "select bdata = bdata2 from bsontest", BSON_TYPE_INT32, &oval);
+
+    // Note this changes the column from type BLOB to type string which
+    // should be caught by the "if not BLOB" logic...
+    exec_bct(db,"break bdata2 on purpose", "update bsontest set bdata2 = \"zzzz\"", 1);
+    exec_bst(db,"verify broken bdata2", "select bdata = bdata2 from bsontest", BSON_TYPE_INT32, &zval);
+
+
     
     sqlite3_close(db);
 }
