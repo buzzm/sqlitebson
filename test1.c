@@ -149,6 +149,7 @@ static int insert(sqlite3 *db) {
     sqlite3_stmt* stmt = 0;
 
     char jbuf[512];
+    char jbuf2[512];
 
     //
     //  You can create BSON from scratch but for the purposes of this
@@ -156,21 +157,32 @@ static int insert(sqlite3 *db) {
     //
     //  That weird binary is:  Pretend this is a JPEG
     //
-    sprintf(jbuf, "{\"hdr\":{\"id\":\"A%d\", \"ts\":{\"$date\":\"2023-01-12T13:14:15.678Z\"}, \"bigint\":{\"$numberLong\":\"743859238573\"}}, \"amt\":{\"$numberDecimal\":\"10.09\"},  \"A\":{\"B\":[ 7 ,{\"X\":\"QQ\", \"Y\":[\"ee\",\"ff\"]}, 3.14159  ]}, \"thumbnail\" : { \"$binary\" : { \"base64\" : \"UHJldGVuZCB0aGlzIGlzIGEgSlBFRw==\", \"subType\" : \"00\" }}  }", 0);
+    sprintf(jbuf, "{\"hdr\":{\"id\":\"A%d\", \"ts\":{\"$date\":\"2023-01-12T13:14:15.678Z\"}, \"bigint\":{\"$numberLong\":\"743859238573\"}}, \"amt\":{\"$numberDecimal\":\"10.09\"},  \"A\":{\"B\":[ 7 ,{\"X\":\"QQ\", \"Y\":[\"ee\",\"ff\"]}, 3.14159  ]}, \"thumbnail\" : { \"$binary\" : { \"base64\" : \"UHJldGVuZCB0aGlzIGlzIGEgSlBFRw==\", \"subType\" : \"00\" }}  }", 0); // id:"A0"
+
+    sprintf(jbuf2, "{\"hdr\":{\"id\":\"A%d\", \"ts\":{\"$date\":\"2023-01-12T13:14:15.678Z\"}, \"bigint\":{\"$numberLong\":\"743859238573\"}}, \"amt\":{\"$numberDecimal\":\"10.09\"},  \"A\":{\"B\":[ 7 ,{\"X\":\"QQ\", \"Y\":[\"ee\",\"ff\"]}, 3.14159  ]}, \"thumbnail\" : { \"$binary\" : { \"base64\" : \"UHJldGVuZCB0aGlzIGlzIGEgSlBFRw==\", \"subType\" : \"00\" }}  }", 3); // id:"A3"
 
 
     bson_error_t err; // on stack
     bson_t* b = bson_new_from_json((const uint8_t *)jbuf, strlen(jbuf), &err);
     if(b == NULL) {
-	printf("ERROR bad JSON upon insert");
+	printf("ERROR bad JSON 1 upon insert");
 	return 1;
     } 
-
     //  Now, get the raw bytes from the BSON object to save as a BLOB:
     const uint8_t* data = bson_get_data(b);
     int32_t len = b->len; // yes; there is no bson_get_len(b)
 
-    int rc = sqlite3_prepare_v2(db, "INSERT INTO bsontest (bdata) values (?)", -1, &stmt, 0 );
+    b = bson_new_from_json((const uint8_t *)jbuf2, strlen(jbuf2), &err);
+    if(b == NULL) {
+	printf("ERROR bad JSON 2 upon insert");
+	return 1;
+    } 
+    //  Now, get the raw bytes from the BSON object to save as a BLOB:
+    const uint8_t* data2 = bson_get_data(b);
+    int32_t len2 = b->len; // yes; there is no bson_get_len(b)    
+
+    
+    int rc = sqlite3_prepare_v2(db, "INSERT INTO bsontest (bdata,bdata2) values (?,?)", -1, &stmt, 0 );
     if(rc != SQLITE_OK) {
 	printf("ERROR prep rc: %d\n", rc);
 	return 1;
@@ -178,9 +190,14 @@ static int insert(sqlite3 *db) {
     
     rc = sqlite3_bind_blob( stmt, 1, (const void*) data, len, SQLITE_STATIC);
     if(rc != SQLITE_OK) {
-	printf("ERROR: bind rc: %d\n", rc);
+	printf("ERROR: bind BSON 1 rc: %d\n", rc);
 	return 1;
     }
+    rc = sqlite3_bind_blob( stmt, 2, (const void*) data2, len2, SQLITE_STATIC);
+    if(rc != SQLITE_OK) {
+	printf("ERROR: bind BSON 2 rc: %d\n", rc);
+	return 1;
+    }    
 
     // Doing an insert means we expect a single result DONE back:
     rc = sqlite3_step( stmt );
@@ -332,17 +349,20 @@ int main(int argc, char* argv[]) {
 	exec_bst(db,XXX[q].name, XXX[q].a1, XXX[q].a2, XXX[q].a3);
     }
 
+    // Recall jbuf and jbuf2 differ by a bit!
+    exec_bst(db,"verify bdata = bdata2 is false", "select bdata = bdata2 from bsontest", BSON_TYPE_INT32, &zval);
     
-
     exec_bct(db,"internal BSON copy", "update bsontest set bdata2 = bdata", 1);
     exec_bst(db,"internal BSON copy verify", "select bdata = bdata2 from bsontest", BSON_TYPE_INT32, &oval);
 
-    // Note this changes the column from type BLOB to type string which
+    // Note this changes the column from type BLOB to type integer which
     // should be caught by the "if not BLOB" logic...
-    exec_bct(db,"break bdata2 on purpose", "update bsontest set bdata2 = \"zzzz\"", 1);
+    exec_bct(db,"break bdata2 on purpose", "update bsontest set bdata2 = 17", 1);
     exec_bst(db,"verify broken bdata2", "select bdata = bdata2 from bsontest", BSON_TYPE_INT32, &zval);
 
-
+    ival = 20;
+    exec_bst(db,"check int ops broken bdata2", "select 3 + bdata2 from bsontest", BSON_TYPE_INT32, &ival);
+    
     
     sqlite3_close(db);
 }

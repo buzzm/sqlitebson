@@ -16,7 +16,9 @@ TL;DR: You will need BSON and sqlite development C language SDKs (header files a
 
 .load <path to where you built bsonext.so/.dynlib> sqlite3_bson_init
 Usually you will build bsonext.so in the same directory so no extra path
-components are needed.  'sqlite3_bson_init' is fixed; it is the interface function.
+components are needed but some dynamic library load configurations require
+an explicit path or LD_LIBRARY_PATH to be set.
+'sqlite3_bson_init' is fixed; it is the interface function.
 
     sqlite> .load bsonext sqlite3_bson_init
     sqlite> create table bsontest (bdata BSON); -- see below about column types
@@ -35,7 +37,7 @@ Remember, in sqlite, "what you insert is what you get" so the following will
 just insert JSON as string that cannot be used by the BSON functions:
     sqlite> insert into bsontest (bdata) values ('{"hdr":{"id":"A0", "ts":{"$date":"2023-01-12T13:14:15.678Z"}}, "amt":{"$numberDecimal":"10.09"},  "A":{"B":[ 7 ,{"X":"QQ", "Y":["ee","ff"]}, 3.14159  ]} }'); -- stored as a string, never mind the BSON column "type"
     
-
+After using the proper insert from above, we can continue:
     sqlite> select bson_get(bdata, 'hdr.id') from bsontest;
     A0
 
@@ -414,7 +416,10 @@ Building
 
 Tested on
 
+ * sqlite3 3.34.1 RH 9.3 Fedora  gcc 11.4.1    2024-05-09
+ 
  * sqlite3 3.40.1 OS X 10.15.7 and OS X 13.2  2022-12-28
+
  * sqlite3 3.45.1
    *  OS X 13.2  2024-02-01
    *  OS X 14.3.1 2024-03-08  Apple clang version 15.0.0 (clang-1500.1.0.2.5)
@@ -433,10 +438,21 @@ Requires:
  *  C compiler.  No C++ used. 
 
 
-Your compile/link environment should look something like this:
+Your compile/link environment should look something like this.  Note that
+the `bson` library full name is `bson-1.0`.  This is not the same as
+`bson.1.0`:
+
 ```
-$ gcc -fPIC -dynamiclib -I/path/to/bson/include -I/path/to/sqlite/sdk -Lbson/lib -lbson -lsqlite3  bsonext.c -o bsonext.dylib
+General:
+$ gcc -fPIC -shared -I/path/to/bson/include -I/path/to/sqlite/sdk -L/path/to/bson/lib -lbson-1.0 -lsqlite3  bsonext.c -o bsonext.so
+
+OS X example with typical homebrew-installed paths:
+$ gcc -fPIC -dynamiclib -I/opt/homebrew/Cellar/mongo-c-driver/1.23.2/include/libbson-1.0/bson -I/opt/homebrew/Cellar/sqlite/3.45.1/include  -L/opt/homebrew/Cellar/mongo-c-driver/1.23.2/lib -lbson-1.0 -L/opt/homebrew/Cellar/sqlite/3.45.1/lib -lsqlite3 bsonext.c -o bsonext.dylib
+
+Linux example with typical yum-installed paths:
+$ gcc -fPIC -shared -I/usr/include/libbson-1.0/bson -I/usr/include  -L/usr/lib64 -lbson-1.0 -L/usr/lib64 -lsqlite3 bsonext.c -o bsonext.so
 ```
+Depending on your default dynamic load library configuration, to run `test1` and/or use the BSON extension in `sqlite3`, you may need to set `LD_LIBRARY_PATH` to find the extension in your local directory.
 
 
 
