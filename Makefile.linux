@@ -1,0 +1,29 @@
+#
+#  Change these as necessary:
+#
+BSON_INCLUDE  = -I/usr/include/libbson-1.0/bson
+BSON_SHLIB    = -L/usr/lib64 -lbson-1.0
+
+SQL3_INCLUDE  = -I/usr/include
+SQL3_SHLIB    = -L/usr/lib64 -lsqlite3
+
+
+#  From here down should be OL
+INCS	= $(BSON_INCLUDE) $(SQL3_INCLUDE) 
+
+LIBS	= $(BSON_SHLIB) $(SQL3_SHLIB)
+
+all:	bsonext.so example1 test1
+
+bsonext.so:	bsonext.c
+	gcc -fPIC -shared $(INCS) $(LIBS) bsonext.c -o bsonext.so
+
+example1:  bsonext.so example1.c
+	gcc example1.c $(INCS) $(LIBS) -o example1
+
+test1:  bsonext.so test1.c
+	gcc test1.c $(INCS) $(LIBS) -o test1
+
+
+clean:
+	rm -f bsonext.dylib example1 *~ *.o
