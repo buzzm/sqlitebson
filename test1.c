@@ -144,6 +144,11 @@ static void exec_bst(sqlite3 *db, const char* desc, const char* sql, bson_type_t
     }	
 }
 
+double dval = 3.14159;
+int ival = 7;
+long lval = 743859238573L;
+
+int boolval = 1; // 
 
 static int insert(sqlite3 *db) {
     sqlite3_stmt* stmt = 0;
@@ -157,9 +162,14 @@ static int insert(sqlite3 *db) {
     //
     //  That weird binary is:  Pretend this is a JPEG
     //
-    sprintf(jbuf, "{\"hdr\":{\"id\":\"A%d\", \"ts\":{\"$date\":\"2023-01-12T13:14:15.678Z\"}, \"bigint\":{\"$numberLong\":\"743859238573\"}}, \"amt\":{\"$numberDecimal\":\"10.09\"},  \"A\":{\"B\":[ 7 ,{\"X\":\"QQ\", \"Y\":[\"ee\",\"ff\"]}, 3.14159  ]}, \"thumbnail\" : { \"$binary\" : { \"base64\" : \"UHJldGVuZCB0aGlzIGlzIGEgSlBFRw==\", \"subType\" : \"00\" }}  }", 0); // id:"A0"
+    char *jj = "{\"hdr\":{\"id\":\"A%d\", \"ts\":{\"$date\":\"2023-01-12T13:14:15.678Z\"}, \"bigint\":{\"$numberLong\":\"%ld\"}}, \"amt\":{\"$numberDecimal\":\"10.09\"}, \"flag\":true, \"A\":{\"B\":[ %d ,{\"X\":\"QQ\", \"Y\":[\"ee\",\"ff\"]}, %lf ]}, \"thumbnail\" : { \"$binary\" : { \"base64\" : \"UHJldGVuZCB0aGlzIGlzIGEgSlBFRw==\", \"subType\" : \"00\" }}  }";
+    
+    //sprintf(jbuf, jj, 0, lval, dval, ival, dval); // id:"A0"
+    //sprintf(jbuf2, jj, 3, lval, dval, ival, dval); // id:"A0"
+    sprintf(jbuf, jj, 0, lval, ival, dval);
+    sprintf(jbuf2, jj, 3, lval, ival, dval);
 
-    sprintf(jbuf2, "{\"hdr\":{\"id\":\"A%d\", \"ts\":{\"$date\":\"2023-01-12T13:14:15.678Z\"}, \"bigint\":{\"$numberLong\":\"743859238573\"}}, \"amt\":{\"$numberDecimal\":\"10.09\"},  \"A\":{\"B\":[ 7 ,{\"X\":\"QQ\", \"Y\":[\"ee\",\"ff\"]}, 3.14159  ]}, \"thumbnail\" : { \"$binary\" : { \"base64\" : \"UHJldGVuZCB0aGlzIGlzIGEgSlBFRw==\", \"subType\" : \"00\" }}  }", 3); // id:"A3"
+    printf("jbuf: [%s]\n", jbuf);
 
 
     bson_error_t err; // on stack
@@ -308,9 +318,6 @@ int main(int argc, char* argv[]) {
     int zval = 0;
     int oval = 1;        
     
-    double dval = 3.14159;
-    int ival = 7;
-    long lval = 743859238573L;
 
     const char* fake_binary = "Pretend this is a JPEG";
     char bval[128];
@@ -330,12 +337,15 @@ int main(int argc, char* argv[]) {
 
 	{"no row at all", basic_scalar_test, "select bson_get(bdata,'hdr.id') from bsontest where FALSE", BSON_TYPE_EOD, 0},
 
-	
 	{"double exists", basic_scalar_test, "select bson_get(bdata,'A.B.2') from bsontest", BSON_TYPE_DOUBLE, &dval},	// 3.14159
+
+	{"double exists", basic_scalar_test, "select bson_get(bdata,'A.B.2') from bsontest", BSON_TYPE_DOUBLE, &dval},	// 3.14159	
 
 	{"int32 exists", basic_scalar_test, "select bson_get(bdata,'A.B.0') from bsontest", BSON_TYPE_INT32, &ival},
 
 	{"int64 exists", basic_scalar_test, "select bson_get(bdata,'hdr.bigint') from bsontest", BSON_TYPE_INT64, &lval},
+
+	{"bool exists", basic_scalar_test, "select bson_get(bdata,'flag') from bsontest", BSON_TYPE_INT32, &boolval},	
 
 
 	// decimal, dates, and binary have no type equiv in sqlite; they

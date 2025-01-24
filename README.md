@@ -416,13 +416,17 @@ Building
 
 Tested on
 
- * sqlite3 3.34.1 RH 9.3 Fedora  gcc 11.4.1    2024-05-09
- 
- * sqlite3 3.40.1 OS X 10.15.7 and OS X 13.2  2022-12-28
-
+ * sqlite3 3.45.3
+   *  OS X 14.3.1 2025-01-04  Apple clang version 15.0.0 (clang-1500.1.0.2.5)
+   
  * sqlite3 3.45.1
    *  OS X 13.2  2024-02-01
    *  OS X 14.3.1 2024-03-08  Apple clang version 15.0.0 (clang-1500.1.0.2.5)
+
+ * sqlite3 3.40.1 OS X 10.15.7 and OS X 13.2  2022-12-28
+
+ * sqlite3 3.34.1 RH 9.3 Fedora  gcc 11.4.1    2024-05-09
+ 
 
 Requires:
 

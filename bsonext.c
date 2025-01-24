@@ -164,6 +164,12 @@ static void extract_and_set_context(
 	sqlite3_result_int(context, v);	      
 	break;		
     }
+    case BSON_TYPE_BOOL: {
+	bool v = bson_iter_bool(p_target);
+	//  Convention for bools in sqlite3 is int 1 or 0:
+	sqlite3_result_int(context, v == true ? 1 : 0);
+	break;		
+    }	
     case BSON_TYPE_INT64: {
 	int64_t v = bson_iter_int64(p_target);
 	sqlite3_result_int64(context, v);
